@@ -42,7 +42,7 @@ To use Archive-JS, you need to have the following command-line tools installed:
 Install Archive-JS using npm:
 
 ```bash
-npm install archive-js
+npm i @fauzandotme/archive-js
 ```
 
 ## Usage
