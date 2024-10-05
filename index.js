@@ -168,25 +168,30 @@ class Archive extends EventEmitter {
 
   async _getFileStructure(dir, base = '') {
     const entries = await fs.readdir(dir, { withFileTypes: true });
-    const files = [];
+    const result = [];
 
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       const relativePath = path.join(base, entry.name);
 
-      if (entry.isDirectory()) {
-        files.push(...await this._getFileStructure(fullPath, relativePath));
-      } else {
-        const stats = await fs.stat(fullPath);
-        files.push({
-          name: entry.name,
-          path: relativePath,
-          size: stats.size
-        });
+      const isDirectory = entry.isDirectory();
+      const stats = isDirectory ? null : await fs.stat(fullPath);
+
+      const fileInfo = {
+        name: entry.name,
+        path: relativePath,
+        size: isDirectory ? 0 : stats.size,
+        isDirectory: isDirectory
+      };
+
+      if (isDirectory) {
+        fileInfo.children = await this._getFileStructure(fullPath, relativePath);
       }
+
+      result.push(fileInfo);
     }
 
-    return files;
+    return result;
   }
 
   async _moveFiles(sourceDir, targetDir) {
