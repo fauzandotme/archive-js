@@ -21,6 +21,7 @@ class Archive extends EventEmitter {
   async compress({
     items,
     output,
+    format = 'zip',
     level = 0,
     customStructure = null,
     password = null
@@ -35,13 +36,12 @@ class Archive extends EventEmitter {
     let command, args;
     let tempDir;
     const absoluteOutput = path.resolve(output);
-    const format = path.extname(output).toLowerCase().slice(1);
 
     try {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'archive-'));
       const filesToCompress = await this._prepareFiles(items, tempDir, customStructure);
 
-      switch (format) {
+      switch (format.toLowerCase()) {
         case 'rar':
           command = 'rar';
           args = ['a', `-m${level}`];
@@ -51,16 +51,9 @@ class Archive extends EventEmitter {
           args.push(absoluteOutput, ...filesToCompress);
           break;
         case 'zip':
-          command = '7z';
-          args = ['a', `-t${format}`, `-mx=${level}`, '-y', '-bsp1'];
-          if (password) {
-            args.push(`-p${password}`);
-          }
-          args.push(absoluteOutput, '.');
-          break;
         case '7z':
           command = '7z';
-          args = ['a', `-mx=${level}`, '-y', '-bsp1'];
+          args = ['a', `-t${format}`, `-mx=${level}`, '-y', '-bsp1'];
           if (password) {
             args.push(`-p${password}`);
           }
@@ -70,7 +63,7 @@ class Archive extends EventEmitter {
           throw new ArchiveError(`Unsupported archive format: ${format}`, 'UNSUPPORTED_FORMAT');
       }
 
-      const result = await this._executeCommand(command, args, tempDir);
+      await this._executeCommand(command, args, tempDir);
       return {
         fileName: path.basename(absoluteOutput),
         fullPath: absoluteOutput
@@ -82,9 +75,7 @@ class Archive extends EventEmitter {
       throw new ArchiveError(`Compression failed: ${error.message}`, 'COMPRESSION_FAILED');
     } finally {
       if (tempDir) {
-        await this._removeTempDir(tempDir).catch(error => {
-          console.error(`Failed to remove temp directory: ${error.message}`);
-        });
+        await this._removeTempDir(tempDir).catch(console.error);
       }
     }
   }
@@ -106,11 +97,7 @@ class Archive extends EventEmitter {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'archive-extract-'));
 
     try {
-      if (selectedFiles && selectedFiles.length > 0) {
-        await this._extractSelectedFiles(archiveFile, tempDir, selectedFiles, password);
-      } else {
-        await this._extractToTemp(archiveFile, tempDir, password);
-      }
+      await this._extractToTemp(archiveFile, tempDir, password, selectedFiles);
       const extractedFiles = await this._getFileStructure(tempDir);
       await this._moveFiles(tempDir, outputDir);
 
@@ -120,114 +107,11 @@ class Archive extends EventEmitter {
         files: extractedFiles
       };
     } catch (error) {
-      throw error;
+      throw error; // This will be caught by the .catch() in the user's code
     } finally {
-      await this._removeTempDir(tempDir);
+      await this._removeTempDir(tempDir).catch(console.error);
     }
   }
-
-  async _extractSelectedFiles(archiveFile, tempDir, selectedFiles, password) {
-    const command = '7z';
-    let args = ['x', archiveFile, `-o${tempDir}`, '-y', '-bsp1'];
-    
-    if (password) {
-      args.push(`-p${password}`);
-    }
-
-    // Add selected files to the arguments
-    args.push(...selectedFiles);
-
-    try {
-      await this._executeCommand(command, args);
-    } catch (error) {
-      if (error.message.includes('Wrong password')) {
-        throw new ArchiveError('Incorrect password provided', 'INCORRECT_PASSWORD');
-      }
-      throw new ArchiveError(`Extraction failed: ${error.message}`, 'EXTRACTION_FAILED');
-    }
-  }
-
-
-  async _extractToTemp(archiveFile, tempDir, password) {
-    const command = '7z';
-    let args = ['x', archiveFile, `-o${tempDir}`, '-y', '-bsp1'];
-    
-    if (password) {
-      args.push(`-p${password}`);
-    }
-
-    try {
-      await this._executeCommand(command, args);
-    } catch (error) {
-      if (error.message.includes('Wrong password')) {
-        throw new ArchiveError('Incorrect password provided', 'INCORRECT_PASSWORD');
-      }
-      throw new ArchiveError(`Extraction failed: ${error.message}`, 'EXTRACTION_FAILED');
-    }
-  }
-
-  async _getFileStructure(dir, base = '') {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    const result = [];
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      const relativePath = path.join(base, entry.name);
-
-      const isDirectory = entry.isDirectory();
-      const stats = isDirectory ? null : await fs.stat(fullPath);
-
-      const fileInfo = {
-        name: entry.name,
-        path: relativePath,
-        size: isDirectory ? 0 : stats.size,
-        isDirectory: isDirectory
-      };
-
-      if (isDirectory) {
-        fileInfo.children = await this._getFileStructure(fullPath, relativePath);
-      }
-
-      result.push(fileInfo);
-    }
-
-    return result;
-  }
-
-  async _moveFiles(sourceDir, targetDir) {
-    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const sourcePath = path.join(sourceDir, entry.name);
-      const targetPath = path.join(targetDir, entry.name);
-
-      if (entry.isDirectory()) {
-        await fs.mkdir(targetPath, { recursive: true });
-        await this._moveFiles(sourcePath, targetPath);
-      } else {
-        await fs.rename(sourcePath, targetPath);
-      }
-    }
-  }
-
-  async _removeTempDir(dir) {
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          await this._removeTempDir(fullPath);
-        } else {
-          await fs.unlink(fullPath);
-        }
-      }
-      await fs.rmdir(dir);
-    } catch (error) {
-      console.error(`Failed to remove temporary directory ${dir}: ${error.message}`);
-    }
-  }
-
-
 
   async list({ archiveFile, password = null }) {
     if (!archiveFile) {
@@ -318,6 +202,104 @@ class Archive extends EventEmitter {
     }
   }
 
+  async _extractToTemp(archiveFile, tempDir, password, selectedFiles = null) {
+    const command = '7z';
+    let args = ['x', archiveFile, `-o${tempDir}`, '-y', '-bsp1'];
+    
+    if (password) {
+      args.push(`-p${password}`);
+    }
+  
+    if (selectedFiles && selectedFiles.length > 0) {
+      args.push(...selectedFiles);
+    }
+  
+    return new Promise((resolve, reject) => {
+      const process = spawn(command, args);
+      
+      let stdoutData = '';
+      let stderrData = '';
+  
+      process.stdout.on('data', (data) => {
+        const message = data.toString().trim();
+        stdoutData += message + '\n';
+        this._parseProgress(message);
+      });
+  
+      process.stderr.on('data', (data) => {
+        const message = data.toString().trim();
+        stderrData += message + '\n';
+        this._parseProgress(message);
+      });
+  
+      process.on('error', (err) => {
+        reject(new ArchiveError(`Command execution failed: ${err.message}`, 'COMMAND_EXECUTION_FAILED'));
+      });
+  
+      process.on('exit', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          let errorCode = 'PROCESS_EXIT_ERROR';
+          let errorMessage = `Process exited with code ${code}`;
+          
+          if (stderrData.includes('Wrong password') || stdoutData.includes('Wrong password')) {
+            errorCode = 'INCORRECT_PASSWORD';
+            errorMessage = 'Incorrect password provided';
+          } else if (stderrData.trim() !== '') {
+            errorMessage += `\nError output: ${stderrData.trim()}`;
+          }
+          
+          reject(new ArchiveError(errorMessage, errorCode));
+        }
+      });
+    });
+  }
+
+  async _getFileStructure(dir, base = '') {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const result = [];
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relativePath = path.join(base, entry.name);
+
+      const isDirectory = entry.isDirectory();
+      const stats = isDirectory ? null : await fs.stat(fullPath);
+
+      const fileInfo = {
+        name: entry.name,
+        path: relativePath,
+        size: isDirectory ? 0 : stats.size,
+        isDirectory: isDirectory
+      };
+
+      if (isDirectory) {
+        fileInfo.children = await this._getFileStructure(fullPath, relativePath);
+      }
+
+      result.push(fileInfo);
+    }
+
+    return result;
+  }
+
+  async _moveFiles(sourceDir, targetDir) {
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const sourcePath = path.join(sourceDir, entry.name);
+      const targetPath = path.join(targetDir, entry.name);
+
+      if (entry.isDirectory()) {
+        await fs.mkdir(targetPath, { recursive: true });
+        await this._moveFiles(sourcePath, targetPath);
+      } else {
+        await fs.rename(sourcePath, targetPath);
+      }
+    }
+  }
+
   async _removeTempDir(dir) {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -331,15 +313,12 @@ class Archive extends EventEmitter {
       }
       await fs.rmdir(dir);
     } catch (error) {
-      throw new ArchiveError(`Failed to remove temporary directory ${dir}: ${error.message}`, 'TEMP_DIR_REMOVAL_FAILED');
+      console.error(`Failed to remove temporary directory ${dir}: ${error.message}`);
     }
   }
 
   _executeCommand(command, args, cwd = null) {
     return new Promise((resolve, reject) => {
-      // console.log('Executing command:', command, args.join(' '));
-      // console.log('Working directory:', cwd || process.cwd());
-
       const process = spawn(command, args, { cwd });
       this.spawnID = process.pid;
 
@@ -356,21 +335,14 @@ class Archive extends EventEmitter {
         const message = data.toString().trim();
         errorOutput += message + '\n';
         this._parseProgress(message);
-        
-        if (message.includes('Wrong password')) {
-          this.emit('error', new ArchiveError('Incorrect password provided', 'INCORRECT_PASSWORD'));
-        }
       });
 
       process.on('error', (err) => {
-        const error = new ArchiveError(`Command execution failed: ${err.message}`, 'COMMAND_EXECUTION_FAILED');
-        this.emit('error', error);
-        reject(error);
+        reject(new ArchiveError(`Command execution failed: ${err.message}`, 'COMMAND_EXECUTION_FAILED'));
       });
 
       process.on('exit', (code) => {
         if (code === 0) {
-          this.emit('success', { output: output.trim() });
           resolve(output.trim());
         } else {
           let errorCode = 'PROCESS_EXIT_ERROR';
@@ -381,15 +353,11 @@ class Archive extends EventEmitter {
             errorMessage = 'Incorrect password provided';
           }
           
-          const error = new ArchiveError(errorMessage, errorCode);
-          this.emit('error', error);
-          reject(error);
+          reject(new ArchiveError(errorMessage, errorCode));
         }
       });
     });
   }
-
-
 
   _parseProgress(message) {
     const progressMatch = message.match(/(\d+)%/);
