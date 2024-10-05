@@ -4,7 +4,7 @@ Archive-JS is a Node.js library for compressing, extracting, and listing the con
 
 ## Features
 
-- Compress files and directories into ZIP, RAR, or 7z formats
+- Compress files and directories into ZIP, RAR, or 7z formats (automatically detected from output file extension)
 - Extract files from ZIP, RAR, or 7z archives
 - List contents of archives
 - Password protection support
@@ -52,14 +52,13 @@ Here are some examples of how to use Archive-JS:
 ### Compressing Files
 
 ```javascript
-const { Archive } = require('archive-js');
+const { Archive } = require('@fauzandotme/archive-js');
 
 const archive = new Archive();
 
 archive.compress({
   items: ['file1.txt', 'file2.txt', 'directory1'],
-  output: 'output.zip',
-  format: 'zip',
+  output: 'output.zip', // The format is automatically detected from the file extension
   level: 5,
   password: 'secretpassword'
 })
@@ -79,7 +78,7 @@ archive.on('progress', (progress) => {
 ### Extracting Files
 
 ```javascript
-const { Archive } = require('archive-js');
+const { Archive } = require('@fauzandotme/archive-js');
 
 const archive = new Archive();
 
@@ -104,7 +103,7 @@ archive.on('progress', (progress) => {
 ### Listing Archive Contents
 
 ```javascript
-const { Archive } = require('archive-js');
+const { Archive } = require('@fauzandotme/archive-js');
 
 const archive = new Archive();
 
@@ -125,7 +124,7 @@ archive.list({
 Archive-JS uses a custom `ArchiveError` class for error handling. You can catch these errors and check their `code` property for specific error types:
 
 ```javascript
-const { Archive, ArchiveError } = require('archive-js');
+const { Archive, ArchiveError } = require('@fauzandotme/archive-js');
 
 const archive = new Archive();
 

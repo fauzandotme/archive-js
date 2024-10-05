@@ -21,7 +21,6 @@ class Archive extends EventEmitter {
   async compress({
     items,
     output,
-    format = 'zip',
     level = 0,
     customStructure = null,
     password = null
@@ -36,21 +35,13 @@ class Archive extends EventEmitter {
     let command, args;
     let tempDir;
     const absoluteOutput = path.resolve(output);
+    const format = path.extname(output).toLowerCase().slice(1);
 
     try {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'archive-'));
       const filesToCompress = await this._prepareFiles(items, tempDir, customStructure);
 
-      switch (format.toLowerCase()) {
-        case 'zip':
-          command = 'zip';
-          args = [`-${level}`, '-r'];
-          if (password) {
-            args.push('-e');
-            args.push('-P', password);
-          }
-          args.push(absoluteOutput, '.');
-          break;
+      switch (format) {
         case 'rar':
           command = 'rar';
           args = ['a', `-m${level}`];
@@ -59,9 +50,17 @@ class Archive extends EventEmitter {
           }
           args.push(absoluteOutput, ...filesToCompress);
           break;
+        case 'zip':
+          command = '7z';
+          args = ['a', `-t${format}`, `-mx=${level}`, '-y', '-bsp1'];
+          if (password) {
+            args.push(`-p${password}`);
+          }
+          args.push(absoluteOutput, '.');
+          break;
         case '7z':
           command = '7z';
-          args = ['a', `-mx=${level}`];
+          args = ['a', `-mx=${level}`, '-y', '-bsp1'];
           if (password) {
             args.push(`-p${password}`);
           }
@@ -73,7 +72,6 @@ class Archive extends EventEmitter {
 
       const result = await this._executeCommand(command, args, tempDir);
       return {
-        output: result,
         fileName: path.basename(absoluteOutput),
         fullPath: absoluteOutput
       };
@@ -334,6 +332,9 @@ class Archive extends EventEmitter {
 
   _executeCommand(command, args, cwd = null) {
     return new Promise((resolve, reject) => {
+      // console.log('Executing command:', command, args.join(' '));
+      // console.log('Working directory:', cwd || process.cwd());
+
       const process = spawn(command, args, { cwd });
       this.spawnID = process.pid;
 
